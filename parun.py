@@ -177,6 +177,8 @@ def main():
             fatal("can't read command-list: no such file '%s'" % fpath)
 
         commands = parse_command_list(fpath)
+        if not session_name:
+            session_name = os.path.basename(fpath)
     else:
         commands = args
 
