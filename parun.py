@@ -43,6 +43,8 @@ import os
 import sys
 import getopt
 
+from temp import TempFile
+
 DEFAULT_MINHEIGHT = 8
 
 def usage(e=None):
@@ -57,6 +59,23 @@ def usage(e=None):
 def fatal(s):
     print >> sys.stderr, "error: " + str(s)
     sys.exit(1)
+
+def parse_command_list(fpath):
+    commands = []
+    command = ""
+    for line in file(fpath).readlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if line.endswith('\\'):
+            command += line[:-1]
+        else:
+            command += line
+            commands.append(command)
+            command = ""
+
+    return commands
 
 def main():
     try:
@@ -86,9 +105,11 @@ def main():
         if opt == '--name':
             session_name = val
 
-    for var in ('session_name', 'daemonize', 'minheight', 'args'):
-        print "%s = %s" % (var, `locals()[var]`)
-    
+    if len(args) == 1:
+        commands = parse_command_list(args[0])
+    else:
+        commands = args
+
 if __name__=="__main__":
     main()
 
