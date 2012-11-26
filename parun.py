@@ -9,11 +9,11 @@
 # published by the Free Software Foundation; either version 3 of
 # the License, or (at your option) any later version.
 # 
-"""Runs commands in parallel in a screen session
+"""Run commands in parallel in a screen session
 
 Options:
     --name=STR            Name of screen session
-    --daemon
+    --daemon              Launch screen into background (daemon mode)
 
     --minheight=LINES     Minimum screen window height (default: 8)
                         
@@ -45,6 +45,7 @@ import getopt
 
 import re
 
+import time
 from temp import TempFile
 from commands import mkarg
 import executil
@@ -102,43 +103,7 @@ def fmt_screens(commands, stdin=None):
 
     return screens
 
-def main():
-    try:
-        opts, args = getopt.gnu_getopt(sys.argv[1:], 'h', ['name=',
-                                                           'minheight=',
-                                                           'daemon'])
-    except getopt.GetoptError, e:
-        usage(e)
-
-    if not args:
-        usage()
-
-    session_name = None
-    daemonize = False
-    minheight = int(os.environ.get('PARUN_MINHEIGHT', str(DEFAULT_MINHEIGHT)))
-
-    for opt, val in opts:
-        if opt == '-h':
-            usage()
-
-        if opt == '--daemon':
-            daemonize = True
-
-        if opt == '--minheight':
-            minheight = int(val)
-
-        if opt == '--name':
-            session_name = val
-
-    if len(args) == 1:
-        fpath = args[0]
-        if not os.path.exists(fpath):
-            fatal("can't read command-list: no such file '%s'" % fpath)
-
-        commands = parse_command_list(fpath)
-    else:
-        commands = args
-
+def parun(commands, minheight=DEFAULT_MINHEIGHT, daemon=False, session_name=None):
     if (termcap_get_lines() - len(commands)) / len(commands) >= minheight:
         split = True
     else:
@@ -157,14 +122,71 @@ def main():
     if split:
         screenrc = "split\nfocus\n".join([ screen + "\n" for screen in screens ])
     else:
-        screenrc = "\n".join(screens) + "\n" + "windowlist -b"
+        screenrc = "\n".join(screens) + "\n" + "windowlist -b" + "\n"
 
     screenrc_tmp = TempFile()
     screenrc_tmp.write(screenrc)
     screenrc_tmp.close()
 
-    executil.system("cat %s > /tmp/debug" % screenrc_tmp.path)
-    executil.system("screen -c", screenrc_tmp.path)
+    args = ["-c", screenrc_tmp.path]
+    if daemon:
+        args += [ "-dm" ]
+
+    if session_name:
+        args += [ "-S", session_name ]
+
+    executil.system("screen", *args)
+    if daemon:
+        time.sleep(1)
+
+def main():
+    try:
+        opts, args = getopt.gnu_getopt(sys.argv[1:], 'h', ['name=',
+                                                           'minheight=',
+                                                           'daemon'])
+    except getopt.GetoptError, e:
+        usage(e)
+
+    if not args:
+        usage()
+
+    session_name = None
+    daemon = False
+    minheight = None
+
+    val = os.environ.get('PARUN_MINHEIGHT')
+    if val:
+        minheight = int(val)
+
+    for opt, val in opts:
+        if opt == '-h':
+            usage()
+
+        if opt == '--daemon':
+            daemon = True
+
+        if opt == '--minheight':
+            minheight = int(val)
+
+        if opt == '--name':
+            session_name = val
+
+    if len(args) == 1:
+        fpath = args[0]
+        if not os.path.exists(fpath):
+            fatal("can't read command-list: no such file '%s'" % fpath)
+
+        commands = parse_command_list(fpath)
+    else:
+        commands = args
+
+    opts = {}
+    for varname in ('minheight', 'daemon', 'session_name'):
+        val = locals()[varname]
+        if val:
+            opts[varname] = val
+
+    parun(commands, **opts)
 
 if __name__=="__main__":
     main()
