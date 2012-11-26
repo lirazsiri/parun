@@ -43,9 +43,16 @@ import os
 import sys
 import getopt
 
+import re
+
 from temp import TempFile
+from commands import mkarg
+import executil
 
 DEFAULT_MINHEIGHT = 8
+
+class Error(Exception):
+    pass
 
 def usage(e=None):
     if e:
@@ -77,6 +84,24 @@ def parse_command_list(fpath):
 
     return commands
 
+def termcap_get_lines():
+    buf = executil.getoutput("resize")
+    m = re.search('LINES=(\d+)', buf)
+    if not m:
+        raise Error("can't parse `resize` output")
+
+    return int(m.group(1))
+
+def fmt_screens(commands, stdin=None):
+    screens = []
+    for command in commands:
+        screen = "screen -t %s /bin/bash -c %s" % (mkarg(command), 
+                                                   mkarg("cat %s | (%s)" % (stdin.path, command) 
+                                                         if stdin else command))
+        screens.append(screen)
+
+    return screens
+
 def main():
     try:
         opts, args = getopt.gnu_getopt(sys.argv[1:], 'h', ['name=',
@@ -106,10 +131,40 @@ def main():
             session_name = val
 
     if len(args) == 1:
-        commands = parse_command_list(args[0])
+        fpath = args[0]
+        if not os.path.exists(fpath):
+            fatal("can't read command-list: no such file '%s'" % fpath)
+
+        commands = parse_command_list(fpath)
     else:
         commands = args
 
+    if (termcap_get_lines() - len(commands)) / len(commands) >= minheight:
+        split = True
+    else:
+        split = False
+
+    stdin = None
+    if not os.isatty(sys.stdin.fileno()):
+        stdin = TempFile()
+        stdin.write(sys.stdin.read())
+        stdin.close()
+
+    # screen wants stdin to be connected to a tty
+    os.dup2(sys.stderr.fileno(), sys.stdin.fileno())
+
+    screens = fmt_screens(commands, stdin)
+    if split:
+        screenrc = "split\nfocus\n".join([ screen + "\n" for screen in screens ])
+    else:
+        screenrc = "\n".join(screens) + "\n" + "windowlist -b"
+
+    screenrc_tmp = TempFile()
+    screenrc_tmp.write(screenrc)
+    screenrc_tmp.close()
+
+    executil.system("cat %s > /tmp/debug" % screenrc_tmp.path)
+    executil.system("screen -c", screenrc_tmp.path)
+
 if __name__=="__main__":
     main()
-
